@@ -43,20 +43,46 @@ static class Program
     private const string SiteUrl = "https://services.gst.gov.in/services/searchtp";
     private const string InputGstid = "input[name='for_gstin']";
     private const string CaptchaInput = "input[name='cap']";
+    private const string gap = " ";
 
     // Column constants
     private const string GstinUin = "GSTIN/UIN";
     private const string AdministrativeOffice = "Administrative Office";
     private const string OtherOffice = "Other Office";
+    private const string MainOffice = "Center / State";
+    private const string Central_ = "Central ";
+    private const string Zone = "Zone";
     private const string Commissionerate = "Commissionerate";
     private const string Division = "Division";
     private const string Range = "Range";
     private const string Jurisdiction = "JURISDICTION";
     private const string Center = "CENTER";
+    private const string State = "State";
+    private const string Charge = "Charge";
+    private const string Circle = "Circle";
+    private const string Ward = "Ward";
+    private const string Sector = "Sector";
+    private const string Unit = "Unit";
+    private const string District = "District";
+    private const string Headquarter = "Headquarter";
+    private const string AC_or_CTO_Ward = "AC / CTO Ward";
+    private const string LOCAL_GST_Office = "LOCAL GST Office";
     private const string Goods = "Goods";
     private const string Services = "Services";
+    //private const string Zone = "Central Zone";
+    //private const string Commissionerate = "Central Commissionerate";
+    //private const string Division = "Central Division";
+    //private const string Range = "Central Range";
 
     #endregion
+
+    // Column lists
+    private static readonly string[] Zone_Commissionerate = new[] { Zone, Commissionerate };
+
+    private static readonly string[] Division_level = new[] { Division };
+
+    private static readonly string[] Sub_division = new[]
+        { Range, Circle, Ward, Unit, Charge, Sector, District, Headquarter, LOCAL_GST_Office, AC_or_CTO_Ward };
 
     private static readonly XLWorkbook Workbook = new XLWorkbook();
     private static readonly IXLWorksheet Sheet = Workbook.Worksheets.Add("Parsed HTML");
@@ -208,7 +234,8 @@ static class Program
         var strongElements = await page.QuerySelectorAllAsync("strong");
 
         var data = new Dictionary<string, string>();
-
+        
+        foreach (var column in ColumnNum.Keys) data[column] = string.Empty;
         data[GstinUin] = gstId;
 
         int col = 2;
@@ -236,11 +263,76 @@ static class Program
                     if (value.Equals(AdministrativeOffice) || value.Equals(OtherOffice))
                     {
                         string[] strs = list[0].Split('(', '-', ')').Where(s => !s.Equals(string.Empty)).ToArray();
+
+                        if (value.Equals(AdministrativeOffice))
+                        {
+                            data[MainOffice] = list.Where(entry 
+                                    => string.Equals(Jurisdiction, entry.Split('(', '-', ')')
+                                                    .First(s => !s.Equals(string.Empty)).Trim(), 
+                                                    StringComparison.OrdinalIgnoreCase))
+                                .Select(s 
+                                    => s.Split('(', '-', ')').Last(s => !s.Equals(string.Empty)))
+                                .First()?.Trim()!;
+                        }
+
                         if (strs[0].Trim().Equals(Jurisdiction) && strs[^1].Trim().Equals(Center))
                         {
-                            data[Commissionerate] = list[^3].Substring(17);
-                            data[Division] = list[^2].Substring(11);
-                            data[Range] = list[^1].Substring(8);
+                            foreach (var str in list)
+                            {
+                                string? title = str.Split('(', '-', ')').FirstOrDefault(s => !s.Equals(string.Empty))?.Trim();
+
+                                if (title is null) continue;
+
+                                if (string.Equals(Zone, title, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    data[Central_ + Zone] = str.Substring(7);
+                                }
+                                else if (string.Equals(Commissionerate, title, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    data[Central_ + Commissionerate] = str.Substring(17);
+                                }
+                                else if (string.Equals(Division, title, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    data[Central_ + Division] = str.Substring(11);
+                                }
+                                else if (string.Equals(Range, title, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    data[Central_ + Range] = str.Substring(8);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            foreach (var item in list)
+                            {
+                                string str = item.Trim();
+                                string? val = Helper.GetFieldValue(str, State);
+                                if (val is not null)
+                                {
+                                    data[State] = data[State] + Environment.NewLine + val;
+                                    continue;
+                                }
+
+                                val = Helper.GetFieldValue(str, Zone_Commissionerate);
+                                if (val is not null)
+                                {
+                                    data[State + gap + Zone] = data[State + gap + Zone] + Environment.NewLine + val;
+                                    continue;
+                                }
+
+                                val = Helper.GetFieldValue(str, Division_level);
+                                if (val is not null)
+                                {
+                                    data[State + gap + Division] = data[State + gap + Division] + Environment.NewLine + val;
+                                    continue;
+                                }
+
+                                val = Helper.GetFieldValue(str, Sub_division);
+                                if (val is not null)
+                                {
+                                    data[State + gap + Charge] = data[State + gap + Charge] + Environment.NewLine + val;
+                                }
+                            }
                         }
                     }
 
@@ -342,10 +434,8 @@ static class Program
         foreach (var dataPair in ColumnNum)
         {
             int currentCol = dataPair.Value;
-            data.TryGetValue(dataPair.Key, out var value);
-            value ??= string.Empty;
 
-            Sheet.Cell(_row, currentCol).Value = value;
+            Sheet.Cell(_row, currentCol).Value = data[dataPair.Key].Trim(' ', '-');
         }
 
         // Apply to used range only
